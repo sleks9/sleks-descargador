@@ -6,7 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 
 const PORT = 5757;
 const HOST = '127.0.0.1';
@@ -14,17 +14,66 @@ const PUBLIC = path.join(__dirname, 'public');
 const OUT = path.join(__dirname, 'descargas');
 fs.mkdirSync(OUT, { recursive: true });
 
+// ---------- Encontrar yt-dlp y ffmpeg ----------
+
+// Lo que se abre con doble clic hereda el PATH de cuando inició la sesión de
+// Windows: si yt-dlp o ffmpeg se instalaron después, no los ve. Leemos el PATH
+// actual del registro y lo juntamos con el heredado.
+function registryPath(key) {
+  try {
+    const out = execFileSync('reg', ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true });
+    const m = out.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
+    return m ? m[1].trim().replace(/%([^%]+)%/g, (all, v) => process.env[v] ?? all) : '';
+  } catch { return ''; }
+}
+
+function freshPath() {
+  const parts = [
+    process.env.PATH || '',
+    registryPath('HKCU\\Environment'),
+    registryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'),
+    path.dirname(process.execPath),
+  ].join(';').split(';').map(s => s.trim()).filter(Boolean);
+  return [...new Map(parts.map(p => [p.toLowerCase().replace(/\\$/, ''), p])).values()].join(';');
+}
+
 // Python escribe en cp1252 cuando la salida es un pipe; forzamos UTF-8 para
 // que los títulos con tildes y emojis lleguen bien.
-const ENV = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+const ENV = { ...process.env, PATH: freshPath(), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
 
-// YouTube exige resolver un reto de JavaScript; usamos el Node que ya está.
-const BASE = ['--js-runtimes', 'node', '--no-playlist', '--no-color'];
+function findExe(name, extraDirs = []) {
+  for (const dir of [...ENV.PATH.split(';'), ...extraDirs]) {
+    const full = path.join(dir, `${name}.exe`);
+    if (fs.existsSync(full)) return full;
+  }
+  return null;
+}
+
+// Si no está en ningún PATH, buscamos donde lo deja `pip install --user`.
+function pipUserScripts() {
+  const base = path.join(process.env.APPDATA || '', 'Python');
+  try {
+    return fs.readdirSync(base).filter(d => /^Python3\d+$/i.test(d)).map(d => path.join(base, d, 'Scripts'));
+  } catch { return []; }
+}
+
+const YTDLP = findExe('yt-dlp', pipUserScripts());
+const FFMPEG = findExe('ffmpeg', ['C:\\CLI\\ffmpeg\\bin', 'C:\\ffmpeg\\bin']);
+// Último recurso: el módulo de Python a través del lanzador `py`.
+const YTDLP_CMD = YTDLP ? [YTDLP] : ['py', '-m', 'yt_dlp'];
+
+// YouTube exige resolver un reto de JavaScript; usamos este mismo Node.
+const BASE = [
+  '--js-runtimes', `node:${process.execPath}`,
+  ...(FFMPEG ? ['--ffmpeg-location', path.dirname(FFMPEG)] : []),
+  '--no-playlist', '--no-color',
+];
 
 const TEMP_FILE = /\.(part|ytdl|temp)$|\.f\d+\.|\.part-Frag/i;
 
 function ytdlp(args) {
-  return spawn('yt-dlp', [...BASE, ...args], { env: ENV, windowsHide: true });
+  const [cmd, ...pre] = YTDLP_CMD;
+  return spawn(cmd, [...pre, ...BASE, ...args], { env: ENV, windowsHide: true });
 }
 
 function readLines(stream, onLine) {
@@ -484,5 +533,8 @@ server.on('error', e => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Descargador listo en http://127.0.0.1:${PORT}`);
+  console.log(`  yt-dlp: ${YTDLP || 'no lo encontré; probaré con "py -m yt_dlp"'}`);
+  console.log(`  ffmpeg: ${FFMPEG || 'NO ENCONTRADO: no podrá unir video y audio ni convertir'}`);
+  console.log(`  node:   ${process.execPath}`);
   console.log('Cierra esta ventana para apagarlo.');
 });
