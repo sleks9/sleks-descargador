@@ -4,6 +4,7 @@ const els = {
   form: $('#search'), url: $('#url'), paste: $('#paste'), go: $('#go'),
   status: $('#status'), result: $('#result'),
   thumb: $('#thumb'), duration: $('#duration'), title: $('#title'), channel: $('#channel'),
+  platform: $('#platform'), count: $('#count'), filters: $('#filters'),
   seg: $('.seg'), audioPanel: $('#audio-panel'), videoPanel: $('#video-panel'),
   audioOptions: $('#audio-options'), videoOptions: $('#video-options'),
   compatible: $('#compatible'), download: $('#download'),
@@ -12,7 +13,10 @@ const els = {
   version: $('#version'), update: $('#update'),
 };
 
-const state = { info: null, kind: 'audio', audioFormat: 'original', height: null };
+const state = { info: null, kind: 'audio', audioFormat: 'original', height: null, filter: 'Todo' };
+
+// El filtro elegido se recuerda entre visitas; si el navegador no deja, no pasa nada.
+try { state.filter = localStorage.getItem('sleks-filter') || 'Todo'; } catch {}
 
 // ---------- Utilidades ----------
 
@@ -128,9 +132,9 @@ function option({ title, desc, size, tag, checked, disabled, onPick }) {
 function renderAudio() {
   const a = state.info.audio;
   const dur = state.info.duration || 0;
-  const original = a ? `${a.codec} ${a.kbps} kbps · .${a.ext}` : 'La mejor pista que tenga';
+  const original = a ? `${a.codec}${a.kbps ? ` ${a.kbps} kbps` : ''} · .${a.ext}` : 'La mejor pista que tenga';
   const list = [
-    { key: 'original', title: 'Original', tag: 'Mejor calidad', desc: `${original}. Tal cual lo tiene YouTube, sin volver a comprimir.`, size: a && a.size },
+    { key: 'original', title: 'Original', tag: 'Mejor calidad', desc: `${original}. Tal cual lo tiene ${state.info.platform === 'Otros' ? 'el sitio' : state.info.platform}, sin volver a comprimir.`, size: a && a.size },
     { key: 'mp3', title: 'MP3', desc: 'Se abre en cualquier parte. Vuelve a comprimir, pero no se nota.', size: dur * 245000 / 8 },
     { key: 'm4a', title: 'M4A', desc: 'Ideal para iPhone, iTunes y editores de video.', size: a && a.ext === 'm4a' ? a.size : dur * 130000 / 8 },
     { key: 'wav', title: 'WAV', desc: 'Sin compresión, para editar audio. Pesa mucho.', size: dur * 1411200 / 8 },
@@ -159,8 +163,8 @@ function renderVideo() {
     const disabled = compat && !q.compatible;
     const fps = q.fps && q.fps > 30 ? ` ${Math.round(q.fps)} fps` : '';
     return option({
-      title: `${q.height}p`,
-      tag: q === qs[0] && !compat ? 'Máxima' : qualityName(q.height) || null,
+      title: `${q.res}p`,
+      tag: q === qs[0] && !compat ? 'Máxima' : qualityName(q.res) || null,
       desc: disabled ? 'No existe en H.264' : `${compat ? 'H.264' : q.codec}${fps}`,
       size: fmtBytes(compat ? q.compatSize : q.size),
       checked: !disabled && q.height === state.height,
@@ -188,10 +192,15 @@ els.compatible.addEventListener('change', renderVideo);
 function renderInfo() {
   const i = state.info;
   els.thumb.src = i.thumbnail || '';
+  els.thumb.parentElement.classList.toggle('vertical', !!i.vertical);
   els.duration.textContent = fmtTime(i.duration);
   els.duration.hidden = !i.duration;
+  els.platform.textContent = i.platform;
+  els.platform.dataset.platform = i.platform;
   els.title.textContent = i.title;
   els.channel.textContent = i.channel;
+  els.count.hidden = !(i.count > 1);
+  els.count.textContent = `Este post tiene ${i.count} archivos: se bajan todos.`;
   state.height = null;
   renderAudio();
   renderVideo();
@@ -205,16 +214,17 @@ els.download.addEventListener('click', async () => {
   const i = state.info;
   if (!i) return;
   const audioLabel = { original: `Audio original (.${i.audio ? i.audio.ext : 'audio'})`, mp3: 'Audio MP3', m4a: 'Audio M4A', wav: 'Audio WAV' };
-  const label = state.kind === 'audio'
+  const q = i.qualities.find(x => x.height === state.height);
+  const label = `${i.platform} · ` + (state.kind === 'audio'
     ? audioLabel[state.audioFormat]
-    : `Video ${state.height ? state.height + 'p' : ''}${els.compatible.checked ? ' · compatible' : ''}`;
+    : `Video ${q ? q.res + 'p' : ''}${els.compatible.checked ? ' · compatible' : ''}`);
 
   els.download.disabled = true;
   try {
     await api('/api/download', {
       method: 'POST',
       body: JSON.stringify({
-        url: i.url, videoId: i.id, title: i.title, thumbnail: i.thumbnail, label,
+        url: i.url, videoId: i.id, title: i.title, thumbnail: i.thumbnail, label, platform: i.platform,
         kind: state.kind, audioFormat: state.audioFormat,
         height: state.height, compatible: els.compatible.checked,
       }),
@@ -297,9 +307,45 @@ const ICONS = {
   video: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 5h11a2 2 0 0 1 2 2v1.38l3.55-2.13A1 1 0 0 1 22 7.1v9.8a1 1 0 0 1-1.45.86L17 15.62V17a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>',
 };
 
+const PLATFORM_ORDER = ['YouTube', 'Instagram', 'TikTok', 'Otros'];
+let allFiles = [];
+
 async function loadFiles() {
-  const files = await api('/api/files').catch(() => []);
-  els.filesEmpty.hidden = files.length > 0;
+  allFiles = await api('/api/files').catch(() => []);
+  renderFilters();
+  renderFiles();
+}
+
+function renderFilters() {
+  const present = PLATFORM_ORDER.filter(p => allFiles.some(f => f.platform === p));
+  if (!present.includes(state.filter)) state.filter = 'Todo';
+  // Con una sola plataforma, filtrar no aporta nada.
+  els.filters.hidden = present.length < 2;
+  els.filters.replaceChildren(...['Todo', ...present].map(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(state.filter === p));
+    const n = p === 'Todo' ? allFiles.length : allFiles.filter(f => f.platform === p).length;
+    b.textContent = `${p} `;
+    const c = document.createElement('span');
+    c.className = 'chip-count';
+    c.textContent = n;
+    b.append(c);
+    b.addEventListener('click', () => {
+      state.filter = p;
+      try { localStorage.setItem('sleks-filter', p); } catch {}
+      renderFilters();
+      renderFiles();
+    });
+    return b;
+  }));
+}
+
+function renderFiles() {
+  const files = state.filter === 'Todo' ? allFiles : allFiles.filter(f => f.platform === state.filter);
+  els.filesEmpty.hidden = allFiles.length > 0;
   els.files.replaceChildren(...files.map(f => {
     const ext = (f.name.split('.').pop() || '').toLowerCase();
     const isVideo = ['mp4', 'mkv', 'webm', 'mov'].includes(ext);
@@ -312,9 +358,10 @@ async function loadFiles() {
         <button type="button" class="btn ghost small" data-act="play" aria-expanded="false">Reproducir</button>
         <button type="button" class="btn ghost small" data-act="reveal">Mostrar en carpeta</button>
       </div>`;
-    li.querySelector('.file-name').textContent = f.name.replace(/ \[[\w-]{11}\](?=\.\w+$)/, '');
+    const base = f.name.split('/').pop();
+    li.querySelector('.file-name').textContent = base.replace(/ \[[\w-]{6,}\](?=\.\w+$)/, '');
     li.querySelector('.file-name').title = f.name;
-    li.querySelector('.file-info').textContent = `${ext.toUpperCase()} · ${fmtBytes(f.size)} · ${fmtDate(f.mtime)}`;
+    li.querySelector('.file-info').textContent = `${f.platform} · ${ext.toUpperCase()} · ${fmtBytes(f.size)} · ${fmtDate(f.mtime)}`;
     li.querySelector('[data-act="play"]').addEventListener('click', e => togglePlayer(li, f.name, isVideo, e.currentTarget));
     li.querySelector('[data-act="reveal"]').addEventListener('click', () =>
       api('/api/reveal', { method: 'POST', body: JSON.stringify({ name: f.name }) }));
@@ -356,7 +403,10 @@ function togglePlayer(li, name, isVideo, btn) {
   openPlayer = { li, el, wrap, btn };
 }
 
-els.openFolder.addEventListener('click', () => api('/api/reveal', { method: 'POST', body: '{}' }));
+els.openFolder.addEventListener('click', () => api('/api/reveal', {
+  method: 'POST',
+  body: JSON.stringify(state.filter === 'Todo' ? {} : { folder: state.filter }),
+}));
 
 // ---------- Versión y actualización ----------
 

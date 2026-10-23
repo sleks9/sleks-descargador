@@ -110,6 +110,9 @@ function friendlyError(text) {
     [/Sign in to confirm your age|age-restricted/i, 'Ese video tiene restricción de edad y YouTube pide iniciar sesión.'],
     [/Sign in to confirm you.re not a bot/i, 'YouTube pidió confirmar que no eres un bot. Espera unos minutos y vuelve a intentar.'],
     [/members-only|Join this channel/i, 'Ese video es solo para miembros del canal.'],
+    [/instagram.*(login|log in|rate.?limit|not available|empty media)|(login|log in) required/i,
+      'Instagram pidió iniciar sesión para ese video. Si la cuenta es privada no se puede; si es pública, intenta de nuevo en unos minutos.'],
+    [/tiktok.*(private|not available|unavailable)/i, 'Ese TikTok es privado o ya no está disponible.'],
     [/live event will begin|Premieres in/i, 'Ese video todavía no se ha estrenado.'],
     [/Unable to download|HTTP Error|timed out|getaddrinfo/i, 'Se cortó la conexión. Revisa tu internet y vuelve a intentar.'],
   ];
@@ -135,54 +138,77 @@ const byBitrate = (a, b) => (b.tbr || b.abr || 0) - (a.tbr || a.abr || 0);
 
 function codecName(c = '') {
   if (c.startsWith('opus')) return 'Opus';
-  if (c.startsWith('mp4a')) return 'AAC';
-  if (c.startsWith('avc1')) return 'H.264';
+  if (c.startsWith('mp4a') || c === 'aac') return 'AAC';
+  if (c === 'mp3') return 'MP3';
+  if (/^(avc|h264)/.test(c)) return 'H.264';
+  if (/^(hev|hvc|h265|bytevc1)/.test(c)) return 'H.265';
   if (c.startsWith('vp9') || c.startsWith('vp09')) return 'VP9';
   if (c.startsWith('av01')) return 'AV1';
   return c.split('.')[0].toUpperCase();
 }
 
-function summarize(info) {
-  const fmts = (info.formats || []).filter(f => !/drc/.test(f.format_id || ''));
-  const stereo = fmts
-    .filter(f => f.vcodec === 'none' && f.acodec && f.acodec !== 'none' && (f.audio_channels || 2) <= 2)
-    .sort(byBitrate);
-  // La info se pide con el mismo -f que usa la descarga de audio, así que el
-  // formato de arriba es justo el que yt-dlp va a bajar.
-  const bestAudio = stereo.find(f => f.format_id === info.format_id) || stereo[0];
-  const bestM4a = stereo.find(f => f.ext === 'm4a') || bestAudio;
+const isH264 = f => /^(avc|h264)/.test(f.vcodec || '');
+const hasAudio = f => f.acodec && f.acodec !== 'none';
 
-  const video = fmts.filter(f => f.vcodec && f.vcodec !== 'none' && f.height && f.acodec === 'none');
+// Cada plataforma va a su carpeta. Lo que no sea de estas tres, a "Otros".
+const PLATFORMS = { youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok' };
+function platformOf(info) {
+  const key = String(info.extractor_key || info.extractor || '').toLowerCase();
+  const hit = Object.keys(PLATFORMS).find(k => key.startsWith(k));
+  return hit ? PLATFORMS[hit] : 'Otros';
+}
+
+function summarize(info) {
+  // Un post de Instagram con varios videos llega como lista: mostramos el primero.
+  const count = info._type === 'playlist' ? (info.entries || []).length : 1;
+  const item = info._type === 'playlist' ? ((info.entries || []).find(e => e && e.formats) || info) : info;
+
+  const fmts = (item.formats || []).filter(f => !/drc/.test(f.format_id || '') && f.format_id !== 'download');
+  const audioOnly = fmts.filter(f => f.vcodec === 'none' && hasAudio(f) && (f.audio_channels || 2) <= 2).sort(byBitrate);
+  // La info se pide con el mismo -f que usa la descarga de audio, así que el
+  // formato elegido es justo el que yt-dlp va a bajar.
+  const chosen = fmts.find(f => f.format_id === item.format_id);
+  const bestAudio = audioOnly.find(f => f.format_id === item.format_id) || audioOnly[0] || (chosen && hasAudio(chosen) ? chosen : null);
+  const bestM4a = audioOnly.find(f => f.ext === 'm4a') || bestAudio;
+
+  // TikTok e Instagram suelen traer video y audio en el mismo archivo: también cuentan.
+  const video = fmts.filter(f => f.vcodec && f.vcodec !== 'none' && f.height);
   const heights = [...new Set(video.map(f => f.height))].filter(h => h >= 144).sort((a, b) => b - a);
+  const withAudio = (f, a) => size(f) ? size(f) + (hasAudio(f) ? 0 : size(a)) : 0;
   const qualities = heights.map(h => {
     const best = video.filter(f => f.height === h).sort(byBitrate)[0];
-    const h264 = video.filter(f => f.height === h && (f.vcodec || '').startsWith('avc1')).sort(byBitrate)[0];
+    const h264 = video.filter(f => f.height === h && isH264(f)).sort(byBitrate)[0];
     return {
-      height: h,
+      height: h,                                       // para el filtro de yt-dlp
+      res: Math.min(h, best.width || h),               // lo que se muestra: en vertical, el lado corto
       fps: best.fps || null,
       codec: codecName(best.vcodec),
-      size: size(best) ? size(best) + size(bestAudio) : 0,
-      compatSize: h264 && size(h264) ? size(h264) + size(bestM4a) : 0,
+      size: withAudio(best, bestAudio),
+      compatSize: h264 ? withAudio(h264, bestM4a) : 0,
       compatible: !!h264,
     };
   });
 
-  const thumbs = (info.thumbnails || []).filter(t => t.url && t.width).sort((a, b) => b.width - a.width);
-  const thumb = (thumbs.find(t => t.width <= 1280) || thumbs[0] || {}).url || info.thumbnail || '';
+  const thumbs = (item.thumbnails || []).filter(t => t.url && t.width).sort((a, b) => b.width - a.width);
+  const thumb = (thumbs.find(t => t.width <= 1280) || thumbs[0] || {}).url || item.thumbnail || info.thumbnail || '';
+  const w = item.width || (video[0] && video[0].width), hgt = item.height || (video[0] && video[0].height);
 
   return {
-    id: info.id,
+    id: item.id || info.id,
     url: info.webpage_url || info.original_url,
-    title: info.title,
-    channel: info.channel || info.uploader || '',
-    duration: info.duration || 0,
+    platform: platformOf(item.extractor_key ? item : info),
+    title: item.title || info.title || item.description || 'Sin título',
+    channel: item.channel || item.uploader || info.uploader || '',
+    duration: item.duration || 0,
     thumbnail: thumb,
-    isLive: !!info.is_live,
+    vertical: !!(w && hgt && hgt > w),
+    count,
+    isLive: !!item.is_live,
     audio: bestAudio ? {
       codec: codecName(bestAudio.acodec),
       kbps: Math.round(bestAudio.abr || bestAudio.tbr || 0),
-      ext: bestAudio.ext === 'webm' ? 'opus' : bestAudio.ext,
-      size: size(bestAudio),
+      ext: bestAudio.ext === 'webm' ? 'opus' : (bestAudio.vcodec === 'none' ? bestAudio.ext : 'm4a'),
+      size: bestAudio.vcodec === 'none' ? size(bestAudio) : 0,
     } : null,
     qualities,
   };
@@ -213,30 +239,45 @@ const PP_LABEL = {
   MoveFiles: 'Terminando',
 };
 
-function buildArgs({ url, kind, audioFormat, height, compatible }) {
+// descargas/<Plataforma>/<Audio|Video>
+function targetDir(platform, kind) {
+  const p = Object.values(PLATFORMS).includes(platform) ? platform : 'Otros';
+  const dir = path.join(OUT, p, kind === 'video' ? 'Video' : 'Audio');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function buildArgs({ url, kind, audioFormat, height, compatible, platform }) {
+  // En TikTok e Instagram el "título" es el texto del post; el autor ayuda a encontrarlo.
+  const name = platform === 'YouTube'
+    ? '%(title).150B [%(id)s].%(ext)s'
+    : '%(uploader,channel|Sin autor)s - %(title).90B [%(id)s].%(ext)s';
   const args = [
     '--newline', '--progress', '--no-quiet', '--windows-filenames', '--no-mtime',
-    '-P', OUT,
-    '-o', '%(title).150B [%(id)s].%(ext)s',
+    '-P', targetDir(platform, kind),
+    '-o', name,
     '--embed-metadata',
     '--progress-template', 'download:P|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress.filename)s',
     '--progress-template', 'postprocess:PP|%(progress.postprocessor)s|%(progress.status)s',
     '--print', 'after_move:F|%(filepath)s',
   ];
 
+  // `<=?` deja pasar los formatos que no dicen cuántos canales tienen (TikTok,
+  // Instagram); sin el `?` yt-dlp los descarta y "no hay formato".
   if (kind === 'audio') {
-    const stereo = 'ba[audio_channels<=2]/ba';
+    const stereo = 'ba[audio_channels<=?2]/ba/b';
     if (audioFormat === 'mp3') args.push('-f', stereo, '-x', '--audio-format', 'mp3', '--audio-quality', '0', '--embed-thumbnail');
-    else if (audioFormat === 'm4a') args.push('-f', 'ba[ext=m4a][audio_channels<=2]/' + stereo, '-x', '--audio-format', 'm4a', '--embed-thumbnail');
+    else if (audioFormat === 'm4a') args.push('-f', 'ba[ext=m4a][audio_channels<=?2]/' + stereo, '-x', '--audio-format', 'm4a', '--embed-thumbnail');
     else if (audioFormat === 'wav') args.push('-f', stereo, '-x', '--audio-format', 'wav');
     else args.push('-f', stereo, '-x', '--embed-thumbnail'); // original: sin recomprimir
   } else {
     const h = Number(height) > 0 ? `[height<=${Number(height)}]` : '';
+    const h264 = `[vcodec~='^(avc|h264)']`;
     if (compatible) {
       // H.264 + AAC en MP4: lo abre cualquier editor (CapCut, Premiere) y cualquier reproductor.
-      args.push('-f', `bv*${h}[vcodec^=avc1]+ba[ext=m4a]/b${h}[ext=mp4]/bv*${h}+ba/b${h}`, '--merge-output-format', 'mp4');
+      args.push('-f', `bv*${h}${h264}+ba[ext=m4a]/b${h}${h264}/b${h}[ext=mp4]/bv*${h}+ba/b${h}`, '--merge-output-format', 'mp4');
     } else {
-      args.push('-f', `bv*${h}+ba[audio_channels<=2]/bv*${h}+ba/b${h}`, '--merge-output-format', 'mp4/mkv');
+      args.push('-f', `bv*${h}+ba[audio_channels<=?2]/bv*${h}+ba/b${h}`, '--merge-output-format', 'mp4/mkv');
     }
     args.push('--embed-thumbnail');
   }
@@ -251,6 +292,7 @@ function startJob(body) {
     videoId: String(body.videoId || ''),
     title: String(body.title || body.url),
     thumbnail: String(body.thumbnail || ''),
+    platform: Object.values(PLATFORMS).includes(body.platform) ? body.platform : 'Otros',
     kind: body.kind === 'video' ? 'video' : 'audio',
     label: String(body.label || ''),
     status: 'starting',   // starting | downloading | processing | done | error | cancelled
@@ -268,7 +310,7 @@ function startJob(body) {
   };
   jobs.set(job.id, job);
 
-  const proc = ytdlp(buildArgs(body));
+  const proc = ytdlp(buildArgs({ ...body, platform: job.platform }));
   job.proc = proc;
   let lastFile = null;
   let lastSent = 0;
@@ -308,8 +350,9 @@ function startJob(body) {
     }
     // Antes de que empiece a bajar pasan unos segundos; contamos en qué va.
     if (job.status === 'starting') {
-      const stage = /Solving JS/.test(line) ? 'Resolviendo el candado de YouTube…'
-        : /^\[youtube\]/.test(line) ? 'Conectando con YouTube…'
+      const site = job.platform === 'Otros' ? 'el sitio' : job.platform;
+      const stage = /Solving JS/.test(line) ? `Resolviendo el candado de ${site}…`
+        : /^\[(?!info|download)[\w:]+\]/.test(line) ? `Conectando con ${site}…`
         : /^\[info\] .*thumbnail/i.test(line) ? 'Bajando la portada…'
         : /^\[info\] .*Downloading \d+ format/.test(line) ? 'Empezando…'
         : null;
@@ -334,7 +377,7 @@ function startJob(body) {
       job.stage = 'Listo';
       job.percent = 100;
       job.size = fs.statSync(job.file).size;
-      job.file = path.basename(job.file);
+      job.file = relName(job.file);
     } else {
       job.status = 'error';
       job.error = friendlyError(job.log.join('\n'));
@@ -346,14 +389,39 @@ function startJob(body) {
   return job;
 }
 
+// Todos los archivos bajo descargas/, con la ruta relativa (YouTube/Audio/x.opus).
+function walk(dir = OUT, depth = 0) {
+  let out = [];
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory() && depth < 3) out = out.concat(walk(full, depth + 1));
+    else if (ent.isFile()) out.push(full);
+  }
+  return out;
+}
+
+const relName = full => path.relative(OUT, full).split(path.sep).join('/');
+
 function cleanupTemp(videoId) {
   if (!videoId) return;
-  for (const name of fs.readdirSync(OUT)) {
+  for (const full of walk()) {
+    const name = path.basename(full);
     if (name.includes(`[${videoId}]`) && TEMP_FILE.test(name)) {
-      try { fs.unlinkSync(path.join(OUT, name)); } catch {}
+      try { fs.unlinkSync(full); } catch {}
     }
   }
 }
+
+// Lo bajado antes de las carpetas por plataforma era todo de YouTube.
+function migrateLooseFiles() {
+  for (const ent of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (!ent.isFile() || TEMP_FILE.test(ent.name) || ent.name.startsWith('.')) continue;
+    const isVideo = /\.(mp4|mkv|webm|mov)$/i.test(ent.name);
+    const dest = targetDir('YouTube', isVideo ? 'video' : 'audio');
+    try { fs.renameSync(path.join(OUT, ent.name), path.join(dest, ent.name)); } catch {}
+  }
+}
+migrateLooseFiles();
 
 function cancelJob(job) {
   if (!job.proc) return;
@@ -364,22 +432,31 @@ function cancelJob(job) {
 }
 
 function listFiles() {
-  return fs.readdirSync(OUT)
-    .filter(n => !TEMP_FILE.test(n) && !n.startsWith('.'))
-    .map(n => {
-      const st = fs.statSync(path.join(OUT, n));
-      return st.isFile() ? { name: n, size: st.size, mtime: st.mtimeMs } : null;
+  return walk()
+    .filter(full => !TEMP_FILE.test(full) && !path.basename(full).startsWith('.'))
+    .map(full => {
+      const st = fs.statSync(full);
+      const parts = relName(full).split('/');
+      return {
+        name: relName(full),
+        platform: parts.length > 1 ? parts[0] : 'Otros',
+        size: st.size,
+        mtime: st.mtimeMs,
+      };
     })
-    .filter(Boolean)
     .sort((a, b) => b.mtime - a.mtime)
-    .slice(0, 100);
+    .slice(0, 200);
 }
 
-// Solo nombres de archivos que de verdad están dentro de descargas/.
+// Solo rutas que de verdad quedan dentro de descargas/ (nada de ../).
+function insideOut(rel) {
+  const full = path.resolve(OUT, String(rel || ''));
+  return full === OUT || full.startsWith(OUT + path.sep) ? full : null;
+}
+
 function safeFile(name) {
-  const base = path.basename(String(name || ''));
-  const full = path.join(OUT, base);
-  return base && fs.existsSync(full) ? full : null;
+  const full = insideOut(name);
+  return full && full !== OUT && fs.existsSync(full) && fs.statSync(full).isFile() ? full : null;
 }
 
 // ---------- HTTP ----------
@@ -442,7 +519,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/info') {
       const u = url.searchParams.get('url') || '';
       if (!isHttpUrl(u)) return send(res, 400, { error: 'Pega un enlace que empiece por https://' });
-      const raw = await runCollect(['-J', '-f', 'ba[audio_channels<=2]/ba/b', '--', u]);
+      const raw = await runCollect(['-J', '-f', 'ba[audio_channels<=?2]/ba/b', '--', u]);
       return send(res, 200, summarize(JSON.parse(raw)));
     }
 
@@ -481,9 +558,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && p === '/api/reveal') {
       const body = await readBody(req);
       const full = body.name ? safeFile(body.name) : null;
+      // "Abrir carpeta" con un filtro puesto abre la carpeta de esa plataforma.
+      const folder = body.folder ? insideOut(body.folder) : null;
+      const dir = folder && fs.existsSync(folder) ? folder : OUT;
       // Explorer solo entiende /select si la ruta va entre comillas pegada a la coma;
       // Node pondría las comillas alrededor de todo, así que armamos el argumento a mano.
-      const arg = full ? `/select,"${full}"` : `"${OUT}"`;
+      const arg = full ? `/select,"${full}"` : `"${dir}"`;
       spawn('explorer.exe', [arg], { windowsVerbatimArguments: true, detached: true }).unref();
       return send(res, 200, { ok: true });
     }

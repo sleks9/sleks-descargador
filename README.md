@@ -1,6 +1,6 @@
 # sleks. descargador
 
-Una página local y bonita para bajar **audio y video en la mejor calidad** desde YouTube (y cualquier sitio que soporte [yt-dlp](https://github.com/yt-dlp/yt-dlp)). Pegas el enlace, eliges formato y listo.
+Una página local y bonita para bajar **audio y video en la mejor calidad** desde **YouTube, Instagram y TikTok** (y cualquier sitio que soporte [yt-dlp](https://github.com/yt-dlp/yt-dlp)). Pegas el enlace, eliges formato y listo.
 
 Todo corre en tu computador: el servidor solo escucha en `127.0.0.1`, no sube nada a ningún lado y no necesita cuenta.
 
@@ -42,7 +42,19 @@ npm start
 
 y abres `http://127.0.0.1:5757`.
 
-Lo que bajes queda en la carpeta `descargas/`.
+Lo que bajes queda ordenado en `descargas/`, por plataforma y por tipo:
+
+```
+descargas/
+  YouTube/    Audio/  Video/
+  Instagram/  Audio/  Video/
+  TikTok/     Audio/  Video/
+  Otros/      Audio/  Video/
+```
+
+En la página puedes filtrar la lista por plataforma, y "Abrir carpeta" abre la de la plataforma que tengas filtrada.
+
+**Instagram:** los Reels y posts públicos bajan sin cuenta. Si Instagram pide iniciar sesión (pasa con cuentas privadas o cuando limita las peticiones), la app te lo dice.
 
 ## ¿Por qué no Live Server, Vercel o Cloudflare?
 

@@ -14,7 +14,7 @@
         <img src="/icon.svg" alt="" width="44" height="44">
         <div>
           <h1 class="wordmark">sleks<span class="dot">.</span> <span class="wordmark-sub">descargador</span></h1>
-          <p class="muted">Audio y video en la mejor calidad. Todo se queda en tu computador.</p>
+          <p class="muted">YouTube, Instagram y TikTok en la mejor calidad. Todo se queda en tu computador.</p>
         </div>
       </div>
     </header>
@@ -25,7 +25,7 @@
         <span class="material" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 1 1 4.2 4.2l-2 2a1 1 0 1 1-1.4-1.4l2-2a1 1 0 0 0-1.4-1.4l-3.5 3.5a1 1 0 0 1-1.4 0Zm2.8-2.8a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 1 1-4.2-4.2l2-2a1 1 0 0 1 1.4 1.4l-2 2a1 1 0 0 0 1.4 1.4l3.5-3.5a1 1 0 0 1 1.4 0Z"/></svg>
         </span>
-        <input id="url" type="url" inputmode="url" placeholder="Pega aquí el enlace de YouTube" spellcheck="false" required>
+        <input id="url" type="url" inputmode="url" placeholder="Pega el enlace de YouTube, Instagram o TikTok" spellcheck="false" required>
         <button type="button" class="btn ghost" id="paste">Pegar</button>
       </div>
       <button type="submit" class="btn primary" id="go">Buscar</button>
@@ -40,8 +40,10 @@
           <span class="duration" id="duration"></span>
         </div>
         <div class="meta">
+          <span class="platform" id="platform"></span>
           <h2 id="title"></h2>
           <p class="muted" id="channel"></p>
+          <p class="muted small-text" id="count" hidden></p>
         </div>
       </div>
 
@@ -80,6 +82,7 @@
         <h3 class="section-title">Descargados</h3>
         <button type="button" class="btn ghost small" id="open-folder">Abrir carpeta</button>
       </div>
+      <div class="filters" id="filters" role="tablist" aria-label="Filtrar por plataforma" hidden></div>
       <ul class="files" id="files"></ul>
       <p class="muted empty" id="files-empty" hidden>Aún no has bajado nada. Lo que bajes aparece aquí y en la carpeta <code>descargas</code>.</p>
     </section>
