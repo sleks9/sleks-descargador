@@ -8,7 +8,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 
-const PORT = 5757;
+const PORT = Number(process.env.PORT) || 5757;
 const HOST = '127.0.0.1';
 const PUBLIC = path.join(__dirname, 'public');
 const OUT = path.join(__dirname, 'descargas');
@@ -57,10 +57,11 @@ function pipUserScripts() {
   } catch { return []; }
 }
 
-const YTDLP = findExe('yt-dlp', pipUserScripts());
+// Se busca en cada llamada: si yt-dlp se reinstala con el servidor abierto,
+// lo encuentra sin reiniciar. Último recurso: el módulo de Python vía `py`.
+const findYtdlp = () => findExe('yt-dlp', pipUserScripts());
+const ytdlpCmd = () => { const exe = findYtdlp(); return exe ? [exe] : ['py', '-m', 'yt_dlp']; };
 const FFMPEG = findExe('ffmpeg', ['C:\\CLI\\ffmpeg\\bin', 'C:\\ffmpeg\\bin']);
-// Último recurso: el módulo de Python a través del lanzador `py`.
-const YTDLP_CMD = YTDLP ? [YTDLP] : ['py', '-m', 'yt_dlp'];
 
 // YouTube exige resolver un reto de JavaScript; usamos este mismo Node.
 const BASE = [
@@ -72,7 +73,7 @@ const BASE = [
 const TEMP_FILE = /\.(part|ytdl|temp)$|\.f\d+\.|\.part-Frag/i;
 
 function ytdlp(args) {
-  const [cmd, ...pre] = YTDLP_CMD;
+  const [cmd, ...pre] = ytdlpCmd();
   return spawn(cmd, [...pre, ...BASE, ...args], { env: ENV, windowsHide: true });
 }
 
@@ -506,6 +507,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/version') return send(res, 200, { version: await getVersion() });
 
     if (req.method === 'POST' && p === '/api/update') {
+      // pip borra la versión vieja antes de poner la nueva; si yt-dlp está
+      // corriendo, Windows no deja reemplazar el .exe y la instalación queda rota.
+      if ([...jobs.values()].some(j => j.proc)) {
+        return send(res, 409, { error: 'Espera a que terminen las descargas para actualizar.' });
+      }
       const before = await getVersion();
       await new Promise(resolve => {
         const u = spawn('py', ['-m', 'pip', 'install', '--user', '-U', 'yt-dlp[default]'], { env: ENV, windowsHide: true });
@@ -533,7 +539,7 @@ server.on('error', e => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Descargador listo en http://127.0.0.1:${PORT}`);
-  console.log(`  yt-dlp: ${YTDLP || 'no lo encontré; probaré con "py -m yt_dlp"'}`);
+  console.log(`  yt-dlp: ${findYtdlp() || 'NO ENCONTRADO. Instálalo con: py -m pip install --user -U "yt-dlp[default]"'}`);
   console.log(`  ffmpeg: ${FFMPEG || 'NO ENCONTRADO: no podrá unir video y audio ni convertir'}`);
   console.log(`  node:   ${process.execPath}`);
   console.log('Cierra esta ventana para apagarlo.');
