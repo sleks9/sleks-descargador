@@ -32,6 +32,8 @@ No hace falta `npm install`: el proyecto no tiene dependencias.
 
 **Doble clic en `Iniciar.bat`.** Se abre una ventana negra (el servidor) y el navegador en `http://127.0.0.1:5757`. Para apagarlo, cierras la ventana negra.
 
+Si Python no tiene yt-dlp, `Iniciar.bat` lo instala solo la primera vez (`pip install --user`).
+
 O desde una terminal (por ejemplo, la de VS Code o Antigravity):
 
 ```bash
