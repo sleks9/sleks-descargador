@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const { spawn, execFileSync } = require('child_process');
 
 const PORT = Number(process.env.PORT) || 5757;
@@ -37,9 +38,17 @@ function freshPath() {
   return [...new Map(parts.map(p => [p.toLowerCase().replace(/\\$/, ''), p])).values()].join(';');
 }
 
+// A veces el proceso arranca sin APPDATA/LOCALAPPDATA. Python las usa para
+// ubicar lo instalado con `pip --user`, así que sin ellas "no existe" yt-dlp.
+const APPDATA = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+const LOCALAPPDATA = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+
 // Python escribe en cp1252 cuando la salida es un pipe; forzamos UTF-8 para
 // que los títulos con tildes y emojis lleguen bien.
-const ENV = { ...process.env, PATH: freshPath(), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' };
+const ENV = {
+  ...process.env, APPDATA, LOCALAPPDATA,
+  PATH: freshPath(), PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1',
+};
 
 function findExe(name, extraDirs = []) {
   for (const dir of [...ENV.PATH.split(';'), ...extraDirs]) {
@@ -51,7 +60,7 @@ function findExe(name, extraDirs = []) {
 
 // Si no está en ningún PATH, buscamos donde lo deja `pip install --user`.
 function pipUserScripts() {
-  const base = path.join(process.env.APPDATA || '', 'Python');
+  const base = path.join(APPDATA, 'Python');
   try {
     return fs.readdirSync(base).filter(d => /^Python3\d+$/i.test(d)).map(d => path.join(base, d, 'Scripts'));
   } catch { return []; }
@@ -542,5 +551,6 @@ server.listen(PORT, HOST, () => {
   console.log(`  yt-dlp: ${findYtdlp() || 'NO ENCONTRADO. Instálalo con: py -m pip install --user -U "yt-dlp[default]"'}`);
   console.log(`  ffmpeg: ${FFMPEG || 'NO ENCONTRADO: no podrá unir video y audio ni convertir'}`);
   console.log(`  node:   ${process.execPath}`);
+  if (!process.env.APPDATA) console.log(`  (APPDATA venía vacío; uso ${APPDATA})`);
   console.log('Cierra esta ventana para apagarlo.');
 });
