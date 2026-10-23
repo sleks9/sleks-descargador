@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sleks Descargador</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand">
+        <img src="/icon.svg" alt="" width="44" height="44">
+        <div>
+          <h1 class="wordmark">sleks<span class="dot">.</span> <span class="wordmark-sub">descargador</span></h1>
+          <p class="muted">Audio y video en la mejor calidad. Todo se queda en tu computador.</p>
+        </div>
+      </div>
+    </header>
+
+    <form class="search" id="search" autocomplete="off">
+      <label for="url" class="sr-only">Enlace del video</label>
+      <div class="field">
+        <span class="material" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 1 1 4.2 4.2l-2 2a1 1 0 1 1-1.4-1.4l2-2a1 1 0 0 0-1.4-1.4l-3.5 3.5a1 1 0 0 1-1.4 0Zm2.8-2.8a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 1 1-4.2-4.2l2-2a1 1 0 0 1 1.4 1.4l-2 2a1 1 0 0 0 1.4 1.4l3.5-3.5a1 1 0 0 1 1.4 0Z"/></svg>
+        </span>
+        <input id="url" type="url" inputmode="url" placeholder="Pega aquí el enlace de YouTube" spellcheck="false" required>
+        <button type="button" class="btn ghost" id="paste">Pegar</button>
+      </div>
+      <button type="submit" class="btn primary" id="go">Buscar</button>
+    </form>
+
+    <section id="status" class="status" hidden></section>
+
+    <section id="result" class="card result" hidden>
+      <div class="media">
+        <div class="thumb">
+          <img id="thumb" alt="">
+          <span class="duration" id="duration"></span>
+        </div>
+        <div class="meta">
+          <h2 id="title"></h2>
+          <p class="muted" id="channel"></p>
+        </div>
+      </div>
+
+      <div class="seg" role="tablist" aria-label="Qué quieres bajar">
+        <span class="seg-indicator" aria-hidden="true"></span>
+        <button type="button" role="tab" class="seg-btn" data-kind="audio" aria-selected="true">Audio</button>
+        <button type="button" role="tab" class="seg-btn" data-kind="video" aria-selected="false">Video</button>
+      </div>
+
+      <div id="audio-panel" class="panel">
+        <div class="options" role="radiogroup" aria-label="Formato de audio" id="audio-options"></div>
+      </div>
+
+      <div id="video-panel" class="panel" hidden>
+        <div class="options qualities" role="radiogroup" aria-label="Calidad de video" id="video-options"></div>
+        <label class="switch">
+          <input type="checkbox" id="compatible">
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span>
+            <strong>Compatible con editores</strong>
+            <span class="muted block">MP4 en H.264: lo abren CapCut, Premiere y cualquier reproductor. Casi siempre llega hasta 1080p.</span>
+          </span>
+        </label>
+      </div>
+
+      <button type="button" class="btn primary wide" id="download">Descargar audio</button>
+    </section>
+
+    <section id="jobs-wrap" hidden>
+      <h3 class="section-title">Bajando</h3>
+      <ul class="jobs" id="jobs"></ul>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h3 class="section-title">Descargados</h3>
+        <button type="button" class="btn ghost small" id="open-folder">Abrir carpeta</button>
+      </div>
+      <ul class="files" id="files"></ul>
+      <p class="muted empty" id="files-empty" hidden>Aún no has bajado nada. Lo que bajes aparece aquí y en la carpeta <code>descargas</code>.</p>
+    </section>
+
+    <footer class="foot">
+      <div class="credit">
+        <p>Hecho por <strong>Sleks</strong> · código abierto, licencia MIT</p>
+        <div class="credit-links">
+          <a class="btn ghost small" href="https://www.instagram.com/sleks_92/" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm5.5-3.5a1.2 1.2 0 1 1 0 2.4 1.2 1.2 0 0 1 0-2.4ZM7.8 2h8.4A5.8 5.8 0 0 1 22 7.8v8.4a5.8 5.8 0 0 1-5.8 5.8H7.8A5.8 5.8 0 0 1 2 16.2V7.8A5.8 5.8 0 0 1 7.8 2Zm0 2A3.8 3.8 0 0 0 4 7.8v8.4A3.8 3.8 0 0 0 7.8 20h8.4a3.8 3.8 0 0 0 3.8-3.8V7.8A3.8 3.8 0 0 0 16.2 4H7.8Z"/></svg>
+            @sleks_92
+          </a>
+          <a class="btn ghost small" href="https://github.com/sleks9/sleks-descargador" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02a9.6 9.6 0 0 1 5 0c1.91-1.3 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+      <p class="muted small-text">
+        yt-dlp <span id="version">…</span> ·
+        <button type="button" class="link" id="update">Buscar actualización</button>
+        — si un video deja de bajar, casi siempre se arregla actualizando.
+      </p>
+    </footer>
+  </main>
+
+  <template id="tpl-job">
+    <li class="job">
+      <img class="job-thumb" alt="">
+      <div class="job-body">
+        <div class="job-row">
+          <span class="job-title"></span>
+          <button type="button" class="btn ghost small job-action"></button>
+        </div>
+        <div class="bar"><span class="bar-fill"></span></div>
+        <div class="job-row muted small-text">
+          <span class="job-stage"></span>
+          <span class="job-numbers"></span>
+        </div>
+      </div>
+    </li>
+  </template>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

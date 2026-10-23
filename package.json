@@ -1,0 +1,9 @@
+{
+  "name": "descargador",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Descargador local de audio y video (yt-dlp + ffmpeg). Solo escucha en 127.0.0.1.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
